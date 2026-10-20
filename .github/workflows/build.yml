@@ -31,8 +31,9 @@ jobs:
       # sdkmanager for the long-removed "tools" package and fails, so install directly.
       - name: Install SDK 36
         run: |
-          yes | sdkmanager --licenses > /dev/null
-          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null
+          "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0"
 
       - name: Build both flavors
         run: ./gradlew assembleStandardRelease assembleGuardRelease lintStandardRelease --console=plain
