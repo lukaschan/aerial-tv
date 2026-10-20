@@ -420,19 +420,19 @@ private fun SettingsPage(vm: HomeViewModel) {
                 text = stringResource(R.string.st_input_boot),
                 selected = AerialSettings.bootToSource,
                 focusRequester = null,
-                onClick = { AerialSettings.setBootToSource(!AerialSettings.bootToSource) },
+                onClick = { AerialSettings.chooseBootToSource(!AerialSettings.bootToSource) },
             )
             ChoiceRow(
                 text = stringResource(R.string.st_input_wake),
                 selected = AerialSettings.wakeOnSignal,
                 focusRequester = null,
-                onClick = { AerialSettings.setWakeOnSignal(!AerialSettings.wakeOnSignal) },
+                onClick = { AerialSettings.chooseWakeOnSignal(!AerialSettings.wakeOnSignal) },
             )
             ChoiceRow(
                 text = stringResource(R.string.st_input_poweroff),
                 selected = AerialSettings.powerOffOnSignalLoss,
                 focusRequester = null,
-                onClick = { AerialSettings.setPowerOffOnSignalLoss(!AerialSettings.powerOffOnSignalLoss) },
+                onClick = { AerialSettings.choosePowerOffOnSignalLoss(!AerialSettings.powerOffOnSignalLoss) },
             )
         }
         BasicText(

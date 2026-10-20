@@ -65,17 +65,17 @@ object AerialSettings {
         app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit { putString("automation_source", inputId) }
     }
 
-    fun setBootToSource(on: Boolean) {
+    fun chooseBootToSource(on: Boolean) {
         bootToSource = on
         app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit { putBoolean("automation_boot", on) }
     }
 
-    fun setWakeOnSignal(on: Boolean) {
+    fun chooseWakeOnSignal(on: Boolean) {
         wakeOnSignal = on
         app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit { putBoolean("automation_wake", on) }
     }
 
-    fun setPowerOffOnSignalLoss(on: Boolean) {
+    fun choosePowerOffOnSignalLoss(on: Boolean) {
         powerOffOnSignalLoss = on
         app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit { putBoolean("automation_power_off", on) }
     }
