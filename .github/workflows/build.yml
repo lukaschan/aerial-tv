@@ -27,10 +27,12 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - uses: android-actions/setup-android@v3
-
+      # The runner image already carries an Android SDK; setup-android@v3 still asks
+      # sdkmanager for the long-removed "tools" package and fails, so install directly.
       - name: Install SDK 36
-        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+        run: |
+          yes | sdkmanager --licenses > /dev/null
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
       - name: Build both flavors
         run: ./gradlew assembleStandardRelease assembleGuardRelease lintStandardRelease --console=plain
