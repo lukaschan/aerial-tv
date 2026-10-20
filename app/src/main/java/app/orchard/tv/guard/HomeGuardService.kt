@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.database.ContentObserver
+import android.media.tv.TvInputManager
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
@@ -16,8 +17,11 @@ import android.provider.Settings
 import android.util.Log
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
 import androidx.core.content.getSystemService
 import app.orchard.tv.MainActivity
+import app.orchard.tv.settings.AerialSettings
+import app.orchard.tv.system.InputAutomation
 
 /**
  * Keeps Aerial as the home screen on firmwares that will not let a third-party app own HOME
@@ -63,12 +67,137 @@ class HomeGuardService : AccessibilityService() {
         }
     }
 
+    // ---- Input automation: watch the chosen input's signal (see InputAutomation) ----
+
+    /** Last TvInputManager state per input id, snapshotted when the callback is registered. */
+    private val inputStates = HashMap<String, Int>()
+
+    private var signalLossCheck: Runnable? = null
+
+    private val inputCallback = object : TvInputManager.TvInputCallback() {
+        override fun onInputStateChanged(inputId: String, state: Int) {
+            handler.post { onInputState(inputId, state) }
+        }
+    }
+
+    private fun watchInputs() {
+        val tim = getSystemService<TvInputManager>() ?: return
+        runCatching {
+            tim.tvInputList.forEach { info ->
+                inputStates[info.id] = runCatching { tim.getInputState(info.id) }.getOrDefault(TvInputManager.INPUT_STATE_DISCONNECTED)
+            }
+            tim.registerCallback(inputCallback, handler)
+        }.onFailure { Log.w(InputAutomation.TAG, "could not watch input states: $it") }
+    }
+
+    private fun onInputState(inputId: String, state: Int) {
+        val prev = inputStates.put(inputId, state)
+        // No previous value means this input was only just enumerated; that is the snapshot
+        // settling, not a transition, and must not wake or switch anything.
+        if (prev == null || prev == state) return
+        AerialSettings.init(this)
+        if (inputId != AerialSettings.automationSourceId) return
+        if (state == TvInputManager.INPUT_STATE_CONNECTED) {
+            cancelSignalLossCheck()
+            if (!AerialSettings.wakeOnSignal || isViewingTarget()) return
+            val wasInteractive = getSystemService<PowerManager>()?.isInteractive == true
+            Log.i(InputAutomation.TAG, "signal appeared on the watched input (was $prev, screen ${if (wasInteractive) "on" else "off"})")
+            InputAutomation.wakeScreen(this)
+            // A panel that was off needs a moment before the player can come to the front.
+            handler.postDelayed(
+                { InputAutomation.switchToTarget(this, "signal appeared") },
+                if (wasInteractive) 0L else 900L,
+            )
+        } else if (prev == TvInputManager.INPUT_STATE_CONNECTED) {
+            // CONNECTED_STANDBY and DISCONNECTED both mean the picture is gone; which one a
+            // sleeping source reports is the firmware's choice (see InputAutomation).
+            if (!AerialSettings.powerOffOnSignalLoss) return
+            Log.i(InputAutomation.TAG, "signal lost on the watched input; turning off in ${InputAutomation.SIGNAL_LOSS_POWER_OFF_MS / 1000}s unless it returns")
+            cancelSignalLossCheck()
+            val check = Runnable {
+                signalLossCheck = null
+                val now = inputStates[inputId]
+                if (now == TvInputManager.INPUT_STATE_CONNECTED) return@Runnable
+                if (getSystemService<PowerManager>()?.isInteractive != true) return@Runnable
+                if (!isViewingTarget()) {
+                    Log.i(InputAutomation.TAG, "signal still gone, but the watched input is not on screen; leaving the TV on")
+                    return@Runnable
+                }
+                Log.i(InputAutomation.TAG, "signal gone for ${InputAutomation.SIGNAL_LOSS_POWER_OFF_MS / 1000}s on the input being watched; turning the TV off")
+                powerOff()
+            }
+            signalLossCheck = check
+            handler.postDelayed(check, InputAutomation.SIGNAL_LOSS_POWER_OFF_MS)
+        }
+    }
+
+    private fun cancelSignalLossCheck() {
+        signalLossCheck?.let { handler.removeCallbacks(it) }
+        signalLossCheck = null
+    }
+
+    /** True while the foreground window belongs to the player that shows the watched input. */
+    private fun isViewingTarget(): Boolean {
+        val pkg = InputAutomation.targetSource(this)?.intent?.component?.packageName ?: return false
+        return lastWindow?.first == pkg
+    }
+
+    /**
+     * Turns the TV off without a system permission: the direct goToSleep first, then the
+     * system power dialog (a global accessibility action), choosing its Standby entry when it
+     * has one and Power off otherwise — the same choice the remote's power key makes.
+     */
+    private fun powerOff() {
+        if (InputAutomation.tryGoToSleep(this)) return
+        val shown = runCatching { performGlobalAction(GLOBAL_ACTION_POWER_DIALOG) }.getOrDefault(false)
+        if (!shown) {
+            Log.w(InputAutomation.TAG, "power off failed: goToSleep refused and the power dialog would not open")
+            return
+        }
+        handler.postDelayed({ clickPowerOffEntry(attempt = 0) }, 800)
+    }
+
+    private fun clickPowerOffEntry(attempt: Int) {
+        val root = runCatching { rootInActiveWindow }.getOrNull()
+        val entry = root?.let { findPowerOffEntry(it) }
+        if (entry == null) {
+            // The dialog can be slow to lay out on these firmwares; look once more, then give up
+            // and leave the dialog for the viewer rather than clicking around blindly.
+            if (attempt == 0) handler.postDelayed({ clickPowerOffEntry(attempt = 1) }, 1_200)
+            else Log.w(InputAutomation.TAG, "power dialog is open but no standby / power-off entry was found in it")
+            return
+        }
+        var node: AccessibilityNodeInfo? = entry
+        while (node != null && !node.isClickable) node = node.parent
+        val clicked = node?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
+        Log.i(InputAutomation.TAG, if (clicked) "chose '${entry.text ?: entry.contentDescription}' in the power dialog" else "found the power entry but could not click it")
+    }
+
+    private fun findPowerOffEntry(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        // Standby is what the remote's power key does on these TVs; a full power off is the
+        // fallback. Search in that order, over the whole dialog each time.
+        for (pattern in POWER_OFF_PATTERNS) {
+            var hit: AccessibilityNodeInfo? = null
+            fun walk(node: AccessibilityNodeInfo) {
+                if (hit != null) return
+                val label = (node.text ?: node.contentDescription)?.toString()
+                if (label != null && pattern.containsMatchIn(label)) { hit = node; return }
+                for (i in 0 until node.childCount) { node.getChild(i)?.let { walk(it) } }
+            }
+            walk(root)
+            if (hit != null) return hit
+        }
+        return null
+    }
+
     override fun onServiceConnected() {
         instance = this
         refreshStockHomes()
         registerReceiver(screenOn, IntentFilter(Intent.ACTION_SCREEN_ON))
         contentResolver.registerContentObserver(Settings.Global.getUriFor(Settings.Global.ADB_ENABLED), false, adbObserver)
         GuardSetup.ensureAdb(this)
+        AerialSettings.init(this)
+        watchInputs()
         // Bound a little after boot, or brought back after the firmware killed Aerial: either way
         // the stock launcher is what's in front, and the window change that showed it is long gone.
         // Not after an update, though: installing over Aerial also kills it, and whoever is watching
@@ -104,6 +233,7 @@ class HomeGuardService : AccessibilityService() {
     override fun onDestroy() {
         runCatching { unregisterReceiver(screenOn) }
         runCatching { contentResolver.unregisterContentObserver(adbObserver) }
+        runCatching { getSystemService<TvInputManager>()?.unregisterCallback(inputCallback) }
         handler.removeCallbacksAndMessages(null)
         if (instance === this) instance = null
         super.onDestroy()
@@ -190,6 +320,12 @@ class HomeGuardService : AccessibilityService() {
     companion object {
         private const val TAG = "AerialGuard"
         private const val BOOT_WINDOW_MS = 3 * 60 * 1000L
+
+        /** Power dialog entries, in the order they should be chosen (see powerOff). */
+        private val POWER_OFF_PATTERNS = listOf(
+            Regex("待机|Standby|Sleep", RegexOption.IGNORE_CASE),
+            Regex("关机|关电视|Power ?off|Shut ?down|Turn ?off", RegexOption.IGNORE_CASE),
+        )
 
         @Volatile
         private var instance: HomeGuardService? = null

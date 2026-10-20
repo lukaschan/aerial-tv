@@ -65,6 +65,9 @@ class MainActivity : ComponentActivity() {
         }
         Wallpapers.init(this)
         AerialSettings.init(this)
+        // Every route that brings Aerial up after a reboot funnels through here (default Home,
+        // Home Guard, the boot receiver), so this is the one place boot input switching hooks in.
+        app.orchard.tv.system.InputAutomation.scheduleBootSwitch(this)
         val reducedMotion = Settings.Global.getFloat(contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
 
         // The home screen paints every pixel itself; a window background would be one more

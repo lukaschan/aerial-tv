@@ -42,6 +42,8 @@ Built for the Xiaomi, TCL and other TVs sold in China. It takes over at boot and
 - **Icons**: apps with a TV banner show it. Square icons fill the tile with their own color, and adaptive icons split into layers for a parallax effect.
 - **Every app**: including system apps with no launcher entry, like Xiaomi's App Store, Media Player and Mi Home.
 - **Input tiles**: pin HDMI, AV or the antenna to Home and switch to it in one press (Control Center → Inputs → Show on Home).
+- **Single-row app shelf** (fork change): Home shows apps in one row that slides sideways; tiles keep their size instead of wrapping into a second row.
+- **Input automation** (fork change): pick one input in Control Center → Aerial Settings → Input Automation (say the HDMI your Apple TV lives on) and Aerial can switch to it right after boot, wake the TV and switch to it when it starts sending a signal, and turn the TV off when that input's signal has been gone for 10 seconds while it is on screen — for TVs whose HDMI-CEC power linking does not work (older Xiaomi sets). While the TV is fully off, no app can run, so waking from that state still needs the TV's own CEC setting.
 - **Back button**: works like tvOS. In the grid it jumps to the top row; on the top row it starts the screensaver.
 
 ### Long press

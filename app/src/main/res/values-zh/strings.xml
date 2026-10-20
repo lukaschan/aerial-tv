@@ -64,6 +64,13 @@
     <string name="st_focus_standard">标准</string>
     <string name="st_focus_high_hint">选中的 App 外面加一圈白色描边，离得远也看得清。</string>
     <string name="st_focus_standard_hint">与 Apple TV 默认一致：选中的 App 只放大浮起。</string>
+    <string name="st_input_auto">信号源自动化</string>
+    <string name="st_input_target">对这个信号源生效（接 Apple TV 的那一个）：</string>
+    <string name="st_input_none">未指定</string>
+    <string name="st_input_boot">开机后自动切换到该信号源</string>
+    <string name="st_input_wake">有信号时唤醒电视并自动切换过去</string>
+    <string name="st_input_poweroff">信号中断 10 秒后自动关机</string>
+    <string name="st_input_auto_hint">给 HDMI-CEC 联动关机不可靠的电视用。信号中断关机只在该信号源正在播放时触发；电视彻底关机时 Aerial 无法运行，唤醒仍要靠电视自己的 CEC 设置。</string>
     <string name="cc_inputs_pin">显示在主屏幕</string>
     <string name="cc_inputs_pin_hint">选中的信号源会作为磁贴出现在主屏幕最前面，按一下直接切换过去。长按磁贴可以移动或移除。</string>
     <string name="menu_unpin_source">从主屏幕移除</string>

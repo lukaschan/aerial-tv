@@ -67,31 +67,34 @@ import app.orchard.tv.ui.theme.Palette
 import app.orchard.tv.ui.theme.Type
 import kotlin.math.roundToInt
 
-private const val COLUMNS = 5
+/** How many tiles fit across the screen; also the tile size the single row uses. */
+private const val VISIBLE_TILES = 5
 
-/** Grid geometry for the screen at hand. On a 1080p TV this is a 960×540 dp canvas. */
+/**
+ * Shelf geometry for the screen at hand. On a 1080p TV this is a 960×540 dp canvas.
+ * Home is a single row (a fork change: upstream wraps apps into rows of five): tiles keep
+ * the size the five-across grid gave them, and the row slides sideways instead of the
+ * screen scrolling down.
+ */
 private class GridMetrics(screenW: Dp, screenH: Dp) {
     val margin = 56.dp
     val gap = 28.dp
-    val tileW = (screenW - margin * 2 - gap * (COLUMNS - 1)) / COLUMNS
+    val tileW = (screenW - margin * 2 - gap * (VISIBLE_TILES - 1)) / VISIBLE_TILES
     val tileH = tileW * 9f / 16f
     val pitchX = tileW + gap
-    val pitchY = tileH + 50.dp
 
-    /** The top row sits a little past the middle, under the shelf, as on tvOS. */
+    /** The row sits a little past the middle, under the clock, as on tvOS. */
     val topRowY = screenH * 0.555f
+    val screenW = screenW
 
-    /** Where a row rests once you go down into the grid: the row above stays in view. */
-    val restY = screenH * 0.37f
-    val screenH = screenH
+    fun slot(index: Int) = Pair(margin + pitchX * index, topRowY)
 
-    fun slot(index: Int) = Pair(margin + pitchX * (index % COLUMNS), topRowY + pitchY * (index / COLUMNS))
-
-    fun scrollFor(row: Int, rows: Int): Dp {
-        if (row <= 0) return 0.dp
-        val wanted = topRowY + pitchY * row - restY
-        val bottom = topRowY + pitchY * rows + 36.dp - screenH
-        return minOf(wanted, maxOf(bottom, topRowY + pitchY - restY))
+    /** Sideways shift for [index]: resting position once the row has moved is the third slot. */
+    fun scrollFor(index: Int, count: Int): Dp {
+        if (index <= 0 || count <= 0) return 0.dp
+        val wanted = pitchX * index - pitchX * 2
+        val max = margin * 2 + pitchX * (count - 1) + tileW - screenW
+        return wanted.coerceIn(0.dp, maxOf(max, 0.dp))
     }
 }
 
@@ -119,7 +122,6 @@ fun HomeScreen(
     var pillFocused by remember { mutableStateOf(false) }
     var lastFocusedIndex by remember { mutableStateOf(0) }
     val focusedIndex = apps.indexOfFirst { it.key == focusedKey }
-    val focusedRow = if (pillFocused || focusedIndex < 0) 0 else focusedIndex / COLUMNS
     val gridEnabled = overlay == Overlay.None
 
     fun focusApp(index: Int) {
@@ -153,9 +155,8 @@ fun HomeScreen(
     }
 
     BackHandler(enabled = overlay == Overlay.None && moving == null) {
-        // tvOS: Back from inside the grid returns to the top row; Back on the top row starts the
-        // screensaver.
-        if (focusedRow > 0) focusApp(focusedIndex % COLUMNS) else onStartScreensaver()
+        // tvOS: Back on the top row starts the screensaver. The single row is always the top row.
+        onStartScreensaver()
     }
 
     BoxWithConstraints(
@@ -177,11 +178,9 @@ fun HomeScreen(
             },
     ) {
         val metrics = remember(maxWidth, maxHeight) { GridMetrics(maxWidth, maxHeight) }
-        val rows = (apps.size + COLUMNS - 1) / COLUMNS
-        val collapsePx = with(density) { (metrics.topRowY - metrics.restY).toPx() }
 
         val scroll = remember { Animatable(0f) }
-        val target = with(density) { metrics.scrollFor(focusedRow, rows).toPx() }
+        val target = with(density) { metrics.scrollFor(focusedIndex.coerceAtLeast(0), apps.size).toPx() }
         LaunchedEffect(target) {
             if (reduced) scroll.snapTo(target)
             // A spring keeps its velocity when a quick second press retargets it mid-flight.
@@ -205,16 +204,16 @@ fun HomeScreen(
         ) {
             AmbientBackground(
                 // The chosen wallpaper; in "Follow App" mode, light from the focused app.
+                // The row slides sideways and never goes up under the clock, so no dimming.
                 backdrop = Wallpapers.backdrop ?: ambientApp?.art?.backdrop,
-                dim = { (scroll.value / collapsePx).coerceIn(0f, 1f) * 0.5f },
+                dim = { 0f },
             )
 
-            Box(Modifier.fillMaxSize().offset { IntOffset(0, -scroll.value.roundToInt()) }) {
+            Box(Modifier.fillMaxSize().offset { IntOffset(-scroll.value.roundToInt(), 0) }) {
                 ShelfClock(
                     now = now,
                     modifier = Modifier
-                        .padding(start = metrics.margin, top = metrics.topRowY - 196.dp)
-                        .graphicsLayer { alpha = 1f - (scroll.value / collapsePx * 1.6f).coerceIn(0f, 1f) },
+                        .padding(start = metrics.margin, top = metrics.topRowY - 196.dp),
                 )
 
                 apps.forEachIndexed { index, app ->
@@ -233,7 +232,7 @@ fun HomeScreen(
                             focusRequester = requester(app.key),
                             enabled = gridEnabled,
                             moving = moving == app.key,
-                            columns = COLUMNS,
+                            moveStride = 0,
                             appearDelayMs = (index * 28).coerceAtMost(320),
                             onFocused = {
                                 focusedKey = app.key
@@ -253,20 +252,11 @@ fun HomeScreen(
             }
         }
 
-        // Rows that scroll up under the status pill fade out instead of colliding with it.
-        Canvas(
-            Modifier
-                .fillMaxWidth()
-                .height(120.dp)
-                .graphicsLayer { alpha = (scroll.value / collapsePx).coerceIn(0f, 1f) },
-        ) {
-            drawRect(Brush.verticalGradient(0f to Color.Black, 0.5f to Color.Black.copy(alpha = 0.82f), 1f to Color.Transparent))
-        }
-
         StatusPill(
             now = now,
             network = vm.network,
-            showTime = focusedRow > 0,
+            // The big clock never collapses away now that the row cannot scroll up into it.
+            showTime = false,
             enabled = gridEnabled && moving == null,
             focusRequester = pillRequester,
             onFocused = { gained ->

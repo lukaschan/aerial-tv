@@ -33,6 +33,7 @@ app/src/main/java/app/orchard/tv/
 │   └── AerialSettings.kt    Aerial 自己的偏好（SharedPreferences "settings"）：焦点样式 FocusStyle，默认高对比度
 ├── system/
 │   ├── SystemState.kt       SystemProbe：网络、音量、桌面状态、设置入口、信号源（TvInputManager + 小米路由 + 机型修正）
+│   ├── InputAutomation.kt   信号源自动化（fork 新增）：开机切源的调度与去重、唤醒屏幕、goToSleep 尝试；状态监听在守护服务里
 │   └── Brightness.kt        亮度：小米 picture_backlight / 标准 screen_brightness / TCL 走面板
 ├── guard/
 │   ├── HomeGuardService.kt  无障碍「桌面守护」：原桌面出现就切回、从磁贴进原桌面时临时拦 HOME、亮屏检查、ADB 保持
@@ -60,7 +61,7 @@ tools/install.sh / restore.sh       部署与还原
 ## 首页
 
 - **画布**：`MainActivity` 用 `LocalDensity` 把内容缩放到 960×540dp 的设计画布（`density = 屏幕宽 / 960`）。不同厂商的 1080p 屏幕 dpi 不同（小米 320，TCL 240），这样排版完全一致。Compose 里所有 dp/sp 都按这个画布理解。
-- **网格**（`HomeScreen.GridMetrics`）：5 列，16:9 磁贴，边距 56dp、间距 28dp，第一行在屏幕高 55.5% 处。磁贴用绝对 `offset` 定位，没有用 Row，所以移动 App 时组件不会重建、焦点不会丢，位置变化由 `animateIntOffsetAsState` 做重排动画。
+- **应用栏**（`HomeScreen.GridMetrics`）：单行（fork 改动，上游是 5 列多行网格），16:9 磁贴，边距 56dp、间距 28dp，行在屏幕高 55.5% 处，磁贴大小与 5 列时相同。磁贴用绝对 `offset` 定位，没有用 Row，所以移动 App 时组件不会重建、焦点不会丢，位置变化由 `animateIntOffsetAsState` 做重排动画。焦点行进时整行横向滑动，聚焦磁贴停在第 3 个位置。
 - **滚动**：不用 `verticalScroll`（它会自动 bringIntoView），而是一个 `Animatable` 加内容 `offset`，目标由聚焦行决定（`scrollFor`），用弹簧动画以便连按时平滑改变目标。
 - **焦点**：每个磁贴一个 `FocusRequester`（按包名存在 map 里）。方向键由磁贴自己处理：`moveFocus` 失败时触发边缘回弹。浮层打开时磁贴 `focusable(enabled=false)`，焦点不会逃出浮层；浮层关闭后恢复到原磁贴。HOME 键重置通过 `homeResetPending` 加「窗口重新获得焦点」两个条件触发（在别的 App 在前台时请求焦点会丢）。
 - **返回键**：网格里 → 回第一行；第一行 → 启动屏保（tvOS 行为）。
@@ -121,6 +122,7 @@ NanoHTTPD 监听 8790 端口，路径前缀是 8 位随机令牌（每次打开�
 ## 系统能力（system/）
 
 - **信号源**：`TvInputManager` 列出直通输入和调谐器。装了 `com.xiaomi.mitv.tvplayer` 的走小米的 Intent（HDMI 的 `input = HW 编号 + 18`，AV=2，ATV/DTMB 各自的 Activity），否则走 `TvContract` 的通用 URI。CEC 子输入的名字用于显示设备名，`Playback_1` 这类通用名会被过滤。`DeviceProfile` 存放按机型的修正（MFTR0 隐藏不存在的 HW8，并重命名调谐器）。
+- **信号源自动化**（fork 新增）：`AerialSettings` 里选一个目标信号源 + 三个开关。开机切源由 `MainActivity.onCreate` 调 `InputAutomation.scheduleBootSwitch`（用持久化的开机时间戳去重，待机复活不会重复切）。信号监听在 `HomeGuardService` 里注册 `TvInputManager.TvInputCallback`：目标输入从非 CONNECTED 变为 CONNECTED 时唤醒屏幕并切源；从 CONNECTED 离开满 10 秒、且前台仍是该输入的播放器时关机——先反射 `PowerManager.goToSleep`（普通应用无 DEVICE_POWER，一般失败），再退到无障碍全局动作打开电源对话框并点其中的「待机/关机」条目。睡眠中的源报 CONNECTED_STANDBY 还是 DISCONNECTED 由固件决定，两者都算信号消失。日志 tag `AerialInput`。
 - **音量**：`AudioManager` 的 STREAM_MUSIC；TCL 必须加 `FLAG_SHOW_UI`（否则不会写入功放）。
 - **亮度**：见 `Brightness.kt` 的注释（小米 / 标准 / TCL 面板三种）。
 - **设置入口**：优先厂商自己的设置（小米 `com.xiaomi.mitv.settings`）。

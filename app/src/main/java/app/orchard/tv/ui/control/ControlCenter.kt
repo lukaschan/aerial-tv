@@ -395,6 +395,51 @@ private fun SettingsPage(vm: HomeViewModel) {
             style = Type.Caption,
             modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 8.dp),
         )
+
+        Spacer(Modifier.height(18.dp))
+        BasicText(stringResource(R.string.st_input_auto), style = Type.Callout, modifier = Modifier.padding(start = 14.dp, bottom = 6.dp))
+        BasicText(stringResource(R.string.st_input_target), style = Type.Caption, modifier = Modifier.padding(start = 14.dp, bottom = 6.dp))
+        val target = AerialSettings.automationSourceId
+        ChoiceRow(
+            text = stringResource(R.string.st_input_none),
+            selected = target.isEmpty(),
+            focusRequester = null,
+            onClick = { AerialSettings.chooseAutomationSource("") },
+        )
+        vm.sources.forEach { source ->
+            ChoiceRow(
+                text = source.deviceName?.let { "${source.label} · $it" } ?: source.label,
+                selected = source.id == target,
+                focusRequester = null,
+                onClick = { AerialSettings.chooseAutomationSource(source.id) },
+            )
+        }
+        if (target.isNotEmpty()) {
+            Spacer(Modifier.height(10.dp))
+            ChoiceRow(
+                text = stringResource(R.string.st_input_boot),
+                selected = AerialSettings.bootToSource,
+                focusRequester = null,
+                onClick = { AerialSettings.setBootToSource(!AerialSettings.bootToSource) },
+            )
+            ChoiceRow(
+                text = stringResource(R.string.st_input_wake),
+                selected = AerialSettings.wakeOnSignal,
+                focusRequester = null,
+                onClick = { AerialSettings.setWakeOnSignal(!AerialSettings.wakeOnSignal) },
+            )
+            ChoiceRow(
+                text = stringResource(R.string.st_input_poweroff),
+                selected = AerialSettings.powerOffOnSignalLoss,
+                focusRequester = null,
+                onClick = { AerialSettings.setPowerOffOnSignalLoss(!AerialSettings.powerOffOnSignalLoss) },
+            )
+        }
+        BasicText(
+            stringResource(R.string.st_input_auto_hint),
+            style = Type.Caption,
+            modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 8.dp),
+        )
     }
 }
 

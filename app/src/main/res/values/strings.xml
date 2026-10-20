@@ -65,6 +65,13 @@
     <string name="st_focus_standard">Standard</string>
     <string name="st_focus_high_hint">A white frame around the selected app, easy to spot from across the room.</string>
     <string name="st_focus_standard_hint">As on Apple TV out of the box: the selected app only lifts.</string>
+    <string name="st_input_auto">Input Automation</string>
+    <string name="st_input_target">Act on this input (the one your Apple TV is plugged into):</string>
+    <string name="st_input_none">None</string>
+    <string name="st_input_boot">Switch to it after the TV boots</string>
+    <string name="st_input_wake">Wake the TV and switch to it when it gets a signal</string>
+    <string name="st_input_poweroff">Turn the TV off when its signal is lost for 10 seconds</string>
+    <string name="st_input_auto_hint">For TVs whose HDMI-CEC power linking does not work. Signal loss only turns the TV off while that input is on screen. If the TV is fully off, only its own CEC setting can wake it.</string>
     <string name="cc_inputs_pin">Show on Home</string>
     <string name="cc_inputs_pin_hint">Pinned inputs appear as tiles at the front of Home; select one to switch straight to it. Long-press a tile to move or remove it.</string>
     <string name="menu_unpin_source">Remove from Home</string>

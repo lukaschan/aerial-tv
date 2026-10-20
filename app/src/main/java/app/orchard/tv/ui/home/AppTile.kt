@@ -91,7 +91,8 @@ fun AppTile(
     focusRequester: FocusRequester,
     enabled: Boolean,
     moving: Boolean,
-    columns: Int,
+    /** Slots a vertical press jumps in move mode; 0 on the single-row Home, where Up/Down do nothing. */
+    moveStride: Int,
     appearDelayMs: Int,
     onFocused: () -> Unit,
     onClick: (Rect?) -> Unit,
@@ -212,8 +213,8 @@ fun AppTile(
                         when (code) {
                             NativeKeyEvent.KEYCODE_DPAD_LEFT -> onMove(-1)
                             NativeKeyEvent.KEYCODE_DPAD_RIGHT -> onMove(1)
-                            NativeKeyEvent.KEYCODE_DPAD_UP -> onMove(-columns)
-                            NativeKeyEvent.KEYCODE_DPAD_DOWN -> onMove(columns)
+                            NativeKeyEvent.KEYCODE_DPAD_UP -> if (moveStride > 0) onMove(-moveStride)
+                            NativeKeyEvent.KEYCODE_DPAD_DOWN -> if (moveStride > 0) onMove(moveStride)
                             NativeKeyEvent.KEYCODE_BACK, NativeKeyEvent.KEYCODE_DPAD_CENTER,
                             NativeKeyEvent.KEYCODE_ENTER, NativeKeyEvent.KEYCODE_NUMPAD_ENTER -> onMoveDone()
                             else -> return@onKeyEvent false

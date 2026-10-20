@@ -26,6 +26,9 @@
     <uses-permission android:name="android.permission.WRITE_SETTINGS"
         tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Input automation: a bright wake lock is how a third-party app lights the panel when
+         the watched input starts sending a signal (see system/InputAutomation.kt). -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- A home screen lists every launchable app by definition. -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
