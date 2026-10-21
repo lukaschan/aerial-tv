@@ -1,0 +1,52 @@
+name: Build APKs
+
+# Fork addition: upstream ships releases by hand; this builds both flavors in CI so a
+# change can be verified (and an APK produced) without a local Android SDK.
+# Signing falls back to the debug key (no local/signing.properties in CI), so CI APKs
+# install fresh but cannot update an install signed with a different key.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, patch/wake-boot-source]
+    paths:
+      - 'app/**'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle.properties'
+      - '.github/workflows/build.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # The runner image already carries an Android SDK; setup-android@v3 still asks
+      # sdkmanager for the long-removed "tools" package and fails, so install directly.
+      - name: Install SDK 36
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null
+          "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0"
+
+      # No lint: upstream code carries a pre-existing RestrictedApi error
+      # (MainActivity.dispatchKeyEvent) that lint aborts on; upstream releases assemble only.
+      - name: Build both flavors
+        run: ./gradlew assembleStandardRelease assembleGuardRelease --console=plain
+
+      - name: Name the APKs like the release assets
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/standard/release/app-standard-release.apk dist/aerial-standard.apk
+          cp app/build/outputs/apk/guard/release/app-guard-release.apk dist/aerial-guard.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aerial-apks
+          path: dist/
