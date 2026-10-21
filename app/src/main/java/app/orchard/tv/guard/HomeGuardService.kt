@@ -352,17 +352,26 @@ class HomeGuardService : AccessibilityService() {
                 // Seed the seen-connected set with the inputs' current states: the callback
                 // only reports changes, so a device already on when the guard started (e.g.
                 // woken with the TV over CEC) would never be "seen connected", and its first
-                // sleep would be mistaken for a device that was off all along.
-                val already = watchedInputs(tim).filter {
-                    runCatching { tim.getInputState(it) }.getOrNull() ==
-                        TvInputManager.INPUT_STATE_CONNECTED
-                }
-                signalSeenConnected.addAll(already)
-                if (already.isNotEmpty()) {
-                    Log.i(TAG, "signal watcher: ${already.size} watched input(s) already connected")
-                }
+                // sleep would be mistaken for a device that was off all along. CEC discovery
+                // lags a cold boot by tens of seconds (on-device test, 2026-10-22: the child
+                // input was not yet CONNECTED at registration), so seed again shortly after.
+                seedSeenConnected(tim)
+                handler.postDelayed({ seedSeenConnected(tim) }, 20_000)
+                handler.postDelayed({ seedSeenConnected(tim) }, 60_000)
             }
             .onFailure { Log.w(TAG, "could not watch input states", it) }
+    }
+
+    /** Mark watched inputs that are connected right now as seen connected (see registerSignalCallback). */
+    private fun seedSeenConnected(tim: TvInputManager) {
+        val already = watchedInputs(tim).filter {
+            runCatching { tim.getInputState(it) }.getOrNull() ==
+                TvInputManager.INPUT_STATE_CONNECTED
+        }
+        if (already.isNotEmpty() && !signalSeenConnected.containsAll(already)) {
+            signalSeenConnected.addAll(already)
+            Log.i(TAG, "signal watcher: ${already.size} watched input(s) already connected")
+        }
     }
 
     /** The signal-loss settings live in AerialSettings' file; read fresh, the guard outlives the UI. */
