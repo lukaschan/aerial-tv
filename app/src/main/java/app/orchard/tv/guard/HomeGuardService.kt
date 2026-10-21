@@ -73,6 +73,13 @@ class HomeGuardService : AccessibilityService() {
     private val signalLossCheck = Runnable { powerOffIfSignalStillLost() }
 
     /**
+     * Watched inputs seen CONNECTED since the guard started. A loss only counts as an episode
+     * after a connection: a device that was off all along (the TV was turned on while the box
+     * sleeps, and the boot input opens its no-signal screen) must not turn the TV back off.
+     */
+    private val signalSeenConnected = HashSet<String>()
+
+    /**
      * Bound before unlock (Direct Boot), the guard takes over as soon as credential storage is
      * available, from a process that is already running: on TCL 75S365C (Amlogic t982) starting a
      * process right after unlock waits several seconds behind TCL's boot-time scheduling (PR #45:
@@ -359,11 +366,16 @@ class HomeGuardService : AccessibilityService() {
         val tim = getSystemService<TvInputManager>() ?: return
         if (inputId !in watchedInputs(tim)) return
         if (state == TvInputManager.INPUT_STATE_CONNECTED) {
+            signalSeenConnected += inputId
             if (signalLossInput == inputId) {
                 Log.i(TAG, "signal back on $inputId; cancelling the power-off")
                 clearSignalLoss()
             }
             signalLossFired = false
+            return
+        }
+        if (inputId !in signalSeenConnected) {
+            Log.i(TAG, "no signal on $inputId, but it was never seen connected; not counting it")
             return
         }
         // Anything but CONNECTED counts as no signal; firmwares disagree on STANDBY vs DISCONNECTED.
