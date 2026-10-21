@@ -73,7 +73,6 @@ class HomeGuardService : AccessibilityService() {
     private var signalLossFired = false
     private val signalLossCheck = Runnable { powerOffIfSignalStillLost() }
 
->>>>>>> 3817646 (Power off with the device: when the boot input's CEC device turns off while it is being watched and no signal returns for 10s, turn the TV off (goToSleep, else the power dialog's standby entry). Toggle in Input Settings; the guard watches the boot input plus its CEC child inputs, whose state is the one that reports a sleeping device on MiTV-MTEQ0. ADB test hook: CONFIG broadcast --ez power_off true. versionCode 24, versionName 1.20-wakefix.2)
     /**
      * Watched inputs seen CONNECTED since the guard started. A loss only counts as an episode
      * after a connection: a device that was off all along (the TV was turned on while the box
