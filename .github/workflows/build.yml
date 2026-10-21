@@ -36,6 +36,16 @@ jobs:
           yes | "$SDKMANAGER" --licenses > /dev/null
           "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0"
 
+      - name: Restore the fork's signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          mkdir -p local
+          echo "$KEYSTORE_B64" | base64 -d > local/aerial.keystore
+          printf 'storeFile=aerial.keystore\nstorePassword=%s\nkeyAlias=aerial\nkeyPassword=%s\n' "$KEYSTORE_PASSWORD" "$KEY_PASSWORD" > local/signing.properties
+
       # No lint: upstream code carries a pre-existing RestrictedApi error
       # (MainActivity.dispatchKeyEvent) that lint aborts on; upstream releases assemble only.
       - name: Build both flavors
