@@ -75,6 +75,13 @@ class HomeGuardService : AccessibilityService() {
 
 >>>>>>> 3817646 (Power off with the device: when the boot input's CEC device turns off while it is being watched and no signal returns for 10s, turn the TV off (goToSleep, else the power dialog's standby entry). Toggle in Input Settings; the guard watches the boot input plus its CEC child inputs, whose state is the one that reports a sleeping device on MiTV-MTEQ0. ADB test hook: CONFIG broadcast --ez power_off true. versionCode 24, versionName 1.20-wakefix.2)
     /**
+     * Watched inputs seen CONNECTED since the guard started. A loss only counts as an episode
+     * after a connection: a device that was off all along (the TV was turned on while the box
+     * sleeps, and the boot input opens its no-signal screen) must not turn the TV back off.
+     */
+    private val signalSeenConnected = HashSet<String>()
+
+    /**
      * Bound before unlock (Direct Boot), the guard takes over as soon as credential storage is
      * available, from a process that is already running: on TCL 75S365C (Amlogic t982) starting a
      * process right after unlock waits several seconds behind TCL's boot-time scheduling (PR #45:
@@ -369,11 +376,16 @@ class HomeGuardService : AccessibilityService() {
         val tim = getSystemService<TvInputManager>() ?: return
         if (inputId !in watchedInputs(tim)) return
         if (state == TvInputManager.INPUT_STATE_CONNECTED) {
+            signalSeenConnected += inputId
             if (signalLossInput == inputId) {
                 Log.i(TAG, "signal back on $inputId; cancelling the power-off")
                 clearSignalLoss()
             }
             signalLossFired = false
+            return
+        }
+        if (inputId !in signalSeenConnected) {
+            Log.i(TAG, "no signal on $inputId, but it was never seen connected; not counting it")
             return
         }
         // Anything but CONNECTED counts as no signal; firmwares disagree on STANDBY vs DISCONNECTED.
