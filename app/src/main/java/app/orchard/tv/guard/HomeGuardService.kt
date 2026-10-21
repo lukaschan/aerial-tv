@@ -433,10 +433,15 @@ class HomeGuardService : AccessibilityService() {
     }
 
     /** Taps the standby entry of the power dialog; logs every entry when none matches, for the record. */
-    private fun tapPowerDialogEntry() {
+    private fun tapPowerDialogEntry(attempt: Int = 0) {
         val root = rootInActiveWindow
         if (root == null) {
-            Log.w(TAG, "power dialog: no active window to read")
+            // The dialog can take a moment to draw (and to become the active window).
+            if (attempt < 3) {
+                handler.postDelayed({ tapPowerDialogEntry(attempt + 1) }, POWER_DIALOG_SETTLE_MS)
+            } else {
+                Log.w(TAG, "power dialog: no active window to read")
+            }
             return
         }
         val texts = ArrayList<String>()
