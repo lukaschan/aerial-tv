@@ -2,8 +2,9 @@ name: Build APKs
 
 # Fork addition: upstream ships releases by hand; this builds both flavors in CI so a
 # change can be verified (and an APK produced) without a local Android SDK.
-# Signing falls back to the debug key (no local/signing.properties in CI), so CI APKs
-# install fresh but cannot update an install signed with a different key.
+# Signing uses the fork's own stable key, restored from repo secrets into
+# local/signing.properties (upstream's mechanism), so CI builds update in place and
+# keep the app's settings. Without the secrets it falls back to the debug key.
 
 on:
   workflow_dispatch:
