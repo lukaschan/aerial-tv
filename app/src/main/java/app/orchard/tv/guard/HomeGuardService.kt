@@ -347,7 +347,21 @@ class HomeGuardService : AccessibilityService() {
                 onInputSignalChanged(inputId, state)
         }
         runCatching { tim.registerCallback(callback, handler) }
-            .onSuccess { inputCallback = callback }
+            .onSuccess {
+                inputCallback = callback
+                // Seed the seen-connected set with the inputs' current states: the callback
+                // only reports changes, so a device already on when the guard started (e.g.
+                // woken with the TV over CEC) would never be "seen connected", and its first
+                // sleep would be mistaken for a device that was off all along.
+                val already = watchedInputs(tim).filter {
+                    runCatching { tim.getInputState(it) }.getOrNull() ==
+                        TvInputManager.INPUT_STATE_CONNECTED
+                }
+                signalSeenConnected.addAll(already)
+                if (already.isNotEmpty()) {
+                    Log.i(TAG, "signal watcher: ${already.size} watched input(s) already connected")
+                }
+            }
             .onFailure { Log.w(TAG, "could not watch input states", it) }
     }
 
