@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.database.ContentObserver
+import android.media.tv.TvInputManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -18,6 +19,7 @@ import android.provider.Settings
 import android.util.Log
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
 import androidx.core.content.getSystemService
 import app.orchard.tv.MainActivity
 import app.orchard.tv.settings.AerialSettings
@@ -59,6 +61,19 @@ class HomeGuardService : AccessibilityService() {
     private var takeOverOnWake = false
     private val takeOver = Runnable { takeOverIfStockHomeInFront(takeOverReason, takeOverOnWake) }
 
+    // ---- Power off when the boot input's device turns off ----
+
+    private var inputCallback: TvInputManager.TvInputCallback? = null
+
+    /** The watched input that lost its signal, and what was in front when it went. */
+    private var signalLossInput: String? = null
+    private var signalLossFront: Pair<String, String>? = null
+
+    /** Set once an episode has fired, until the signal returns: no repeated power dialogs. */
+    private var signalLossFired = false
+    private val signalLossCheck = Runnable { powerOffIfSignalStillLost() }
+
+>>>>>>> 3817646 (Power off with the device: when the boot input's CEC device turns off while it is being watched and no signal returns for 10s, turn the TV off (goToSleep, else the power dialog's standby entry). Toggle in Input Settings; the guard watches the boot input plus its CEC child inputs, whose state is the one that reports a sleeping device on MiTV-MTEQ0. ADB test hook: CONFIG broadcast --ez power_off true. versionCode 24, versionName 1.20-wakefix.2)
     /**
      * Bound before unlock (Direct Boot), the guard takes over as soon as credential storage is
      * available, from a process that is already running: on TCL 75S365C (Amlogic t982) starting a
@@ -106,6 +121,7 @@ class HomeGuardService : AccessibilityService() {
         refreshStockHomes()
         filterKeys(false)
         registerReceiver(screenOn, IntentFilter(Intent.ACTION_SCREEN_ON))
+        registerSignalCallback()
         contentResolver.registerContentObserver(Settings.Global.getUriFor(Settings.Global.ADB_ENABLED), false, adbObserver)
         GuardSetup.ensureAdb(this)
         if (!GuardSetup.isUserUnlocked(this)) {
@@ -199,6 +215,10 @@ class HomeGuardService : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        inputCallback?.let { callback ->
+            runCatching { getSystemService<TvInputManager>()?.unregisterCallback(callback) }
+        }
+        inputCallback = null
         runCatching { unregisterReceiver(screenOn) }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             runCatching { unregisterReceiver(userUnlocked) }
@@ -313,6 +333,158 @@ class HomeGuardService : AccessibilityService() {
             .mapValues { it.value.toSet() }
     }
 
+    private fun registerSignalCallback() {
+        val tim = getSystemService<TvInputManager>() ?: return
+        val callback = object : TvInputManager.TvInputCallback() {
+            override fun onInputStateChanged(inputId: String, state: Int) =
+                onInputSignalChanged(inputId, state)
+        }
+        runCatching { tim.registerCallback(callback, handler) }
+            .onSuccess { inputCallback = callback }
+            .onFailure { Log.w(TAG, "could not watch input states", it) }
+    }
+
+    /** The signal-loss settings live in AerialSettings' file; read fresh, the guard outlives the UI. */
+    private fun signalLossEnabled(): Boolean =
+        getSharedPreferences("settings", Context.MODE_PRIVATE)
+            .getBoolean("power_off_on_signal_loss", false)
+
+    private fun bootSourceId(): String? =
+        getSharedPreferences("settings", Context.MODE_PRIVATE).getString("boot_source", null)
+
+    /**
+     * The boot input plus the CEC device inputs registered as its children. A sleeping device is
+     * reported on its CEC child, not on the port: on MiTV-MTEQ0 the physical HW input stays
+     * CONNECTED while the Apple TV sleeps, and only the child drops to CONNECTED_STANDBY
+     * (sampled on the device, 2026-10-21).
+     */
+    private fun watchedInputs(tim: TvInputManager): Set<String> {
+        val boot = bootSourceId() ?: return emptySet()
+        val infos = runCatching { tim.tvInputList }.getOrNull() ?: return setOf(boot)
+        return infos.filter { it.id == boot || it.parentId == boot }.mapTo(HashSet()) { it.id }
+    }
+
+    private fun onInputSignalChanged(inputId: String, state: Int) {
+        if (!GuardSetup.isUserUnlocked(this)) return
+        val tim = getSystemService<TvInputManager>() ?: return
+        if (inputId !in watchedInputs(tim)) return
+        if (state == TvInputManager.INPUT_STATE_CONNECTED) {
+            if (signalLossInput == inputId) {
+                Log.i(TAG, "signal back on $inputId; cancelling the power-off")
+                clearSignalLoss()
+            }
+            signalLossFired = false
+            return
+        }
+        // Anything but CONNECTED counts as no signal; firmwares disagree on STANDBY vs DISCONNECTED.
+        if (!signalLossEnabled() || signalLossFired) return
+        if (signalLossInput == inputId) return // already counting this episode
+        val front = lastWindow
+        Log.i(TAG, "signal lost on $inputId (state $state) with ${front?.first ?: "nothing known"} in front")
+        // Only when the viewer is sitting on a source player: in Aerial or the stock launcher the
+        // device going to sleep in the background is normal and must not take the TV down.
+        if (front == null || front.first == packageName || front.first in stockHomes) return
+        signalLossInput = inputId
+        signalLossFront = front
+        handler.removeCallbacks(signalLossCheck)
+        handler.postDelayed(signalLossCheck, SIGNAL_LOSS_POWER_OFF_MS)
+        Log.i(TAG, "turning the TV off in ${SIGNAL_LOSS_POWER_OFF_MS / 1000}s unless the signal returns")
+    }
+
+    private fun clearSignalLoss() {
+        signalLossInput = null
+        signalLossFront = null
+        handler.removeCallbacks(signalLossCheck)
+    }
+
+    private fun powerOffIfSignalStillLost() {
+        val inputId = signalLossInput ?: return
+        val frontAtLoss = signalLossFront
+        clearSignalLoss()
+        if (!signalLossEnabled()) return
+        val tim = getSystemService<TvInputManager>() ?: return
+        val state = runCatching { tim.getInputState(inputId) }
+            .getOrDefault(TvInputManager.INPUT_STATE_DISCONNECTED)
+        if (state == TvInputManager.INPUT_STATE_CONNECTED) {
+            Log.i(TAG, "signal is back on $inputId; not turning off")
+            return
+        }
+        if (getSystemService<PowerManager>()?.isInteractive != true) {
+            Log.i(TAG, "screen already off; not turning off")
+            return
+        }
+        if (lastWindow != frontAtLoss) {
+            Log.i(TAG, "the viewer moved on to ${lastWindow?.first}; not turning off")
+            return
+        }
+        signalLossFired = true
+        powerOffNow("no signal on $inputId for ${SIGNAL_LOSS_POWER_OFF_MS / 1000}s")
+    }
+
+    /** Turns the TV off the ways an app can: direct sleep first, else the power dialog. */
+    private fun powerOffNow(reason: String) {
+        Log.i(TAG, "turning the TV off: $reason")
+        // Direct sleep needs DEVICE_POWER, which a retail app cannot hold; expected to be refused.
+        val slept = runCatching {
+            val pm = getSystemService<PowerManager>() ?: error("no PowerManager")
+            pm.javaClass.getMethod("goToSleep", Long::class.javaPrimitiveType)
+                .invoke(pm, SystemClock.uptimeMillis())
+            true
+        }.getOrElse {
+            Log.i(TAG, "goToSleep refused (${it.cause?.javaClass?.simpleName ?: it.javaClass.simpleName}); opening the power dialog")
+            false
+        }
+        if (slept) return
+        if (!performGlobalAction(GLOBAL_ACTION_POWER_DIALOG)) {
+            Log.w(TAG, "the power dialog did not open")
+            return
+        }
+        handler.postDelayed({ tapPowerDialogEntry() }, POWER_DIALOG_SETTLE_MS)
+    }
+
+    /** Taps the standby entry of the power dialog; logs every entry when none matches, for the record. */
+    private fun tapPowerDialogEntry() {
+        val root = rootInActiveWindow
+        if (root == null) {
+            Log.w(TAG, "power dialog: no active window to read")
+            return
+        }
+        val texts = ArrayList<String>()
+        val labelled = ArrayList<AccessibilityNodeInfo>()
+        walkNodes(root) { node ->
+            val text = node.text?.toString()?.trim().orEmpty()
+            if (text.isNotEmpty()) {
+                texts += text
+                labelled += node
+            }
+        }
+        for (label in POWER_OFF_LABELS) {
+            val node = labelled.firstOrNull { it.text?.toString()?.trim() == label } ?: continue
+            val target = clickableSelfOrParent(node) ?: node
+            val clicked = target.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            Log.i(TAG, "power dialog: tapped \"$label\" (clicked=$clicked); entries were $texts")
+            return
+        }
+        Log.w(TAG, "power dialog: no standby entry found; entries were $texts")
+    }
+
+    private fun walkNodes(node: AccessibilityNodeInfo, depth: Int = 0, visit: (AccessibilityNodeInfo) -> Unit) {
+        if (depth > 12) return
+        visit(node)
+        for (i in 0 until node.childCount) {
+            node.getChild(i)?.let { walkNodes(it, depth + 1, visit) }
+        }
+    }
+
+    private fun clickableSelfOrParent(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        var current: AccessibilityNodeInfo? = node
+        repeat(6) {
+            if (current?.isClickable == true) return current
+            current = current?.parent
+        }
+        return null
+    }
+
     /**
      * Brings Aerial's one task to the front. No CATEGORY_HOME: on firmwares where Aerial is not the
      * system Home, that category made the system open a second, home-type task with a fresh
@@ -339,6 +511,13 @@ class HomeGuardService : AccessibilityService() {
 
         /** VIDAA's assistant and its launcher (聚好看), on the two VIDAA builds reported (issues #7, #40). */
         private val VIDAA_PACKAGES = listOf("com.hisense.vidaaassistant", "com.jamdeo.tv.vod")
+
+        /** How long the boot input's signal must stay away before the TV turns itself off. */
+        private const val SIGNAL_LOSS_POWER_OFF_MS = 10_000L
+        /** The power dialog needs a moment to draw before its entries can be read and tapped. */
+        private const val POWER_DIALOG_SETTLE_MS = 900L
+        /** Power dialog entries that put the TV to sleep, most CEC-like first. */
+        private val POWER_OFF_LABELS = listOf("待机", "睡眠", "Standby", "Sleep", "Power off", "关机")
         private const val VENDOR_HOME_PREFIX = "android.intent.category.HOME."
 
         @Volatile
@@ -363,6 +542,16 @@ class HomeGuardService : AccessibilityService() {
         /** Lets the stock launcher stay in front until Aerial is back: the viewer opened it on purpose. */
         fun allowStockLauncher() {
             instance?.allowStockUntil = SystemClock.uptimeMillis() + 60 * 60 * 1000L
+        }
+
+        /**
+         * Turns the TV off now, the way the signal-loss watcher does. Backs the ADB test hook in
+         * ConfigReceiver (`--ez power_off true`). False when the guard is not running.
+         */
+        fun powerOffNow(reason: String): Boolean {
+            val s = instance ?: return false
+            s.handler.post { s.powerOffNow(reason) }
+            return true
         }
 
         /** Called when Aerial comes back to the front: the stock launcher is fair game again. */
