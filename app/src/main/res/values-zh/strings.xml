@@ -100,6 +100,8 @@
     <string name="cc_inputs_boot">开机时打开（选一个）</string>
     <string name="cc_inputs_boot_none">不打开，停在 Aerial</string>
     <string name="cc_inputs_boot_hint">电视开机或从待机唤醒时，直接切到这个信号源。按主页键仍会回到 Aerial。</string>
+    <string name="cc_inputs_poweroff">设备关机时同步关机</string>
+    <string name="cc_inputs_poweroff_hint">正在观看上方所选信号源时，若其设备关机且连续 10 秒没有信号，电视随之关机。适合 HDMI-CEC 不能把电视一起带关的设备。</string>
     <string name="cc_inputs_pin_hint">选中的信号源会作为磁贴出现在主屏幕最前面，按一下直接切换过去。长按磁贴可以移动或移除。</string>
     <string name="menu_unpin_source">从主屏幕移除</string>
     <string name="cc_update_available">有新版本 %s</string>

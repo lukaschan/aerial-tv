@@ -32,6 +32,11 @@ class ConfigReceiver : BroadcastReceiver() {
             AerialSettings.init(context)
             AerialSettings.choosePin(null)
         }
+        // ... --ez power_off true   (turn the TV off now, the way the signal-loss watcher does)
+        if (intent.getBooleanExtra("power_off", false)) {
+            resultData = "power_off started=${HomeGuardService.powerOffNow("ADB test")}"
+            return
+        }
         if (intent.hasExtra("keep_adb")) GuardSetup.setKeepAdb(context, intent.getBooleanExtra("keep_adb", false))
         if (intent.hasExtra("own_screensaver")) GuardSetup.setOwnScreensaver(context, intent.getBooleanExtra("own_screensaver", false))
         GuardSetup.ensureEnabled(context)

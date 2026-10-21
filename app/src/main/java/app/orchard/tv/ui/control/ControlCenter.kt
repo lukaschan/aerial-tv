@@ -492,6 +492,19 @@ private fun InputSettingsPage(vm: HomeViewModel, takeFocus: Boolean) {
             style = Type.Caption,
             modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 8.dp),
         )
+
+        Spacer(Modifier.height(18.dp))
+        ChoiceRow(
+            text = stringResource(R.string.cc_inputs_poweroff),
+            selected = AerialSettings.powerOffOnSignalLoss,
+            focusRequester = null,
+            onClick = { AerialSettings.choosePowerOffOnSignalLoss(!AerialSettings.powerOffOnSignalLoss) },
+        )
+        BasicText(
+            stringResource(R.string.cc_inputs_poweroff_hint),
+            style = Type.Caption,
+            modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 8.dp),
+        )
     }
 }
 

@@ -41,6 +41,13 @@ object AerialSettings {
     var bootSource by mutableStateOf<String?>(null); private set
 
     /**
+     * Turn the TV off when the boot input's device turns off while it is being watched and its
+     * signal stays away for 10 s. For devices whose HDMI-CEC does not take the TV down with them.
+     * The watching and the turning off live in HomeGuardService, which reads the pref directly.
+     */
+    var powerOffOnSignalLoss by mutableStateOf(false); private set
+
+    /**
      * Minutes of no input on Home before Aerial's screensaver starts (issue #66). The firmware's own
      * screensaver still caps it: Aerial starts just ahead of that one, see MainActivity.
      */
@@ -78,6 +85,7 @@ object AerialSettings {
         focusStyle = FocusStyle.of(prefs.getString("focus_style", null))
         pinnedSources = prefs.getStringSet("pinned_sources", null)?.toSet() ?: emptySet()
         bootSource = prefs.getString("boot_source", null)
+        powerOffOnSignalLoss = prefs.getBoolean("power_off_on_signal_loss", false)
         pinHash = prefs.getString("pin_hash", null)
         pinSet = pinHash != null
         showAllNames = prefs.getBoolean("show_all_names", false)
@@ -89,6 +97,11 @@ object AerialSettings {
     fun chooseBootSource(id: String?) {
         bootSource = id
         app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit { putString("boot_source", id) }
+    }
+
+    fun choosePowerOffOnSignalLoss(on: Boolean) {
+        powerOffOnSignalLoss = on
+        app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit { putBoolean("power_off_on_signal_loss", on) }
     }
 
     val locked: Boolean get() = pinSet && SystemClock.elapsedRealtime() > unlockedUntil
