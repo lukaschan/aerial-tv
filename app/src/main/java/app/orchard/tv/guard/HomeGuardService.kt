@@ -55,6 +55,9 @@ class HomeGuardService : AccessibilityService() {
     private var takeOverOnWake = false
     private val takeOver = Runnable { takeOverIfStockHomeInFront(takeOverReason, takeOverOnWake) }
 
+    /** Uptime of the last ACTION_SCREEN_ON this service saw; see the take-over in onAccessibilityEvent. */
+    private var lastScreenOnUptime = Long.MIN_VALUE / 2
+
     /**
      * Bound before unlock (Direct Boot), the guard takes over as soon as credential storage is
      * available, from a process that is already running: on TCL 75S365C (Amlogic t982) starting a
@@ -80,6 +83,7 @@ class HomeGuardService : AccessibilityService() {
 
     private val screenOn = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
+            lastScreenOnUptime = SystemClock.uptimeMillis()
             // Firmwares put their own launcher back in front while the TV is in standby, and no
             // window change follows on wake. Look once things have settled after the screen lights.
             takeOverOnceSettled("screen on", woke = true)
@@ -173,8 +177,22 @@ class HomeGuardService : AccessibilityService() {
             return
         }
         val stockInFront = last == null || last.first in stockHomes
-        if (!stockInFront && last != null) Log.i(TAG, "$reason with ${last.first} in front; leaving it there")
-        if (!stockInFront || SystemClock.uptimeMillis() < allowStockUntil) return
+        if (!stockInFront && last != null) {
+            // Aerial itself in front on a screen-on check (MiTV-MTEQ0, issue #42): the window-event
+            // take-over below races this settle check at wake and wins, bringing Aerial back without
+            // the wake flag, and Aerial's process — killed in standby — only registers its own
+            // screen-on receiver once that take-over has started it, after the broadcast has gone.
+            // Nobody then opens the boot input. Deliver the flag here instead; MainActivity's
+            // openBootSource de-dupes within 15 s when its own receiver did fire.
+            if (woke && reason == "screen on" && last.first == packageName) {
+                Log.i(TAG, "$reason with Aerial itself in front; flagging the wake")
+                goHome(woke = true)
+            } else {
+                Log.i(TAG, "$reason with ${last.first} in front; leaving it there")
+            }
+            return
+        }
+        if (SystemClock.uptimeMillis() < allowStockUntil) return
         Log.i(TAG, "$reason with the stock launcher in front; bringing Aerial back")
         goHome(woke)
     }
@@ -240,7 +258,10 @@ class HomeGuardService : AccessibilityService() {
             // Not gated on isDefaultHome(): see takeOverIfStockHomeInFront.
             if (cls !in stockHomes.getValue(pkg) || allowed) return
             Log.i(TAG, "stock home $pkg came to the front; bringing Aerial back")
-            goHome()
+            // A stock home surfacing moments after the screen lit is the standby wake itself
+            // (MiTV-MTEQ0, issue #42): flag it as a wake, like the settled screen-on check would,
+            // or that check finds Aerial already in front and the boot input never opens.
+            goHome(woke = SystemClock.uptimeMillis() - lastScreenOnUptime < WAKE_TAKEOVER_WINDOW_MS)
             return
         }
         filterKeys(false)
@@ -305,6 +326,8 @@ class HomeGuardService : AccessibilityService() {
         private const val TAG = "AerialGuard"
         private const val BOOT_WINDOW_MS = 3 * 60 * 1000L
         private const val SETTLE_MS = 1500L
+        /** A stock-home take-over this soon after the screen lit counts as the wake itself. */
+        private const val WAKE_TAKEOVER_WINDOW_MS = 15_000L
         private const val VENDOR_HOME_PREFIX = "android.intent.category.HOME."
 
         @Volatile

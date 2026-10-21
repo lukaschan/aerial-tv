@@ -163,9 +163,15 @@ class MainActivity : ComponentActivity() {
         if (SystemClock.elapsedRealtime() - bootSourceOpenedAt < 15_000) return
         bootSourceOpenedAt = SystemClock.elapsedRealtime()
         lifecycleScope.launch {
-            val source = withTimeoutOrNull(8_000) {
+            // At a cold wake the app list loads slowly; 8 s was not always enough, and giving up
+            // silently made "the TV starts on" look broken (MiTV-MTEQ0, issue #42). Wait longer
+            // and say so in the log when even that is not enough.
+            val source = withTimeoutOrNull(30_000) {
                 snapshotFlow { vm.sources.firstOrNull { it.id == id } }.filterNotNull().first()
-            } ?: return@launch
+            } ?: run {
+                android.util.Log.w("Aerial", "$reason: $id never appeared in the input list; not opening it")
+                return@launch
+            }
             android.util.Log.i("Aerial", "$reason: opening ${source.label}, the input the TV starts on")
             openedAppSinceHome = true
             open(source.intent)
